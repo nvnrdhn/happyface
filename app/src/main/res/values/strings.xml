@@ -1,3 +1,16 @@
 <resources>
     <string name="app_name">HappyFace</string>
+
+    <!-- TODO: Remove or change this placeholder text -->
+    <string name="hello_blank_fragment">Hello blank fragment</string>
+    <string-array name="onboarding_titles">
+        <item>Welcome!</item>
+        <item>Capture</item>
+        <item>Discover</item>
+    </string-array>
+    <string-array name="onboarding_descriptions">
+        <item>Ever wondered what your facial expression means? This app helps you discover meanings from your mood. Let\'s get started!</item>
+        <item>Please capture your face as clear as possible so we can give the best result!</item>
+        <item>We\'ll try to identify your mood based on your facial expression using latest technology.</item>
+    </string-array>
 </resources>
