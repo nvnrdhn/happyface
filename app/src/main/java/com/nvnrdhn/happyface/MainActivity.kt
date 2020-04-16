@@ -1,27 +1,49 @@
 package com.nvnrdhn.happyface
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.MediaScannerConnection
+import android.net.Uri
 import android.os.Bundle
+import android.util.Log
 import android.view.View
+import android.webkit.MimeTypeMap
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageCapture
+import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.content.ContextCompat
+import androidx.core.net.toFile
 import androidx.lifecycle.LifecycleOwner
 import androidx.preference.PreferenceManager
 import com.google.common.util.concurrent.ListenableFuture
 import kotlinx.android.synthetic.main.activity_main.*
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.*
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 
 private const val REQUEST_CODE_PERMISSIONS = 10
 private val REQUIRED_PERMISSIONS = arrayOf(Manifest.permission.CAMERA)
 
+private const val TAG = "HappyFace"
+private const val FILENAME = "yyyy-MM-dd-HH-mm-ss-SSS"
+private const val PHOTO_EXTENSION = ".jpg"
+private const val RATIO_4_3_VALUE = 4.0 / 3.0
+private const val RATIO_16_9_VALUE = 16.0 / 9.0
+
 class MainActivity : AppCompatActivity() {
 
     private lateinit var cameraProviderFuture : ListenableFuture<ProcessCameraProvider>
+    private lateinit var imageCapture: ImageCapture
+    private lateinit var outputDirectory: File
+    private lateinit var cameraExecutor: ExecutorService
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -34,12 +56,19 @@ class MainActivity : AppCompatActivity() {
                 finish()
             }
         }
+        cameraExecutor = Executors.newSingleThreadExecutor()
+        outputDirectory = getOutputDirectory(this)
         if (allPermissionsGranted()) {
             preview_view.post { startCamera() }
         }
         else {
             requestPermissions(REQUIRED_PERMISSIONS, REQUEST_CODE_PERMISSIONS)
         }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        cameraExecutor.shutdown()
     }
 
     override fun onRequestPermissionsResult(
@@ -65,19 +94,71 @@ class MainActivity : AppCompatActivity() {
         }, ContextCompat.getMainExecutor(this))
     }
 
-    fun bindPreview(cameraProvider : ProcessCameraProvider) {
-        var preview : Preview = Preview.Builder()
+    private fun bindPreview(cameraProvider : ProcessCameraProvider) {
+        val preview = Preview.Builder()
             .build()
 
-        var cameraSelector : CameraSelector = CameraSelector.Builder()
+        val cameraSelector = CameraSelector.Builder()
             .requireLensFacing(CameraSelector.LENS_FACING_FRONT)
             .build()
 
-        var camera = cameraProvider.bindToLifecycle(this as LifecycleOwner, cameraSelector, preview)
+        imageCapture = ImageCapture.Builder()
+            .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+            .setTargetRotation(preview_view.display.rotation)
+            .build()
+
+        val camera = cameraProvider.bindToLifecycle(this as LifecycleOwner, cameraSelector, preview, imageCapture)
         preview.setSurfaceProvider(preview_view.createSurfaceProvider(camera.cameraInfo))
+        capture.setOnClickListener { takePhoto() }
     }
 
     private fun allPermissionsGranted() = REQUIRED_PERMISSIONS.all {
         checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED
     }
+
+    private fun takePhoto() {
+        val photoFile = createFile(outputDirectory, FILENAME, PHOTO_EXTENSION)
+        val outputFileOptions = ImageCapture.OutputFileOptions.Builder(photoFile).build()
+
+        imageCapture.takePicture(outputFileOptions, cameraExecutor, object : ImageCapture.OnImageSavedCallback {
+            override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
+                val savedUri = outputFileResults.savedUri ?: Uri.fromFile(photoFile)
+                runOnUiThread {
+                    Toast.makeText(this@MainActivity, "Photo saved: $savedUri", Toast.LENGTH_SHORT).show()
+                }
+                // If the folder selected is an external media directory, this is
+                // unnecessary but otherwise other apps will not be able to access our
+                // images unless we scan them using [MediaScannerConnection]
+                val mimeType = MimeTypeMap.getSingleton()
+                    .getMimeTypeFromExtension(savedUri.toFile().extension)
+                MediaScannerConnection.scanFile(
+                    this@MainActivity,
+                    arrayOf(savedUri.toString()),
+                    arrayOf(mimeType)
+                ) { _, uri ->
+                    Log.d(TAG, "Image capture scanned into media store: $uri")
+                }
+            }
+
+            override fun onError(exception: ImageCaptureException) {
+                exception.printStackTrace()
+                Toast.makeText(this@MainActivity, exception.localizedMessage, Toast.LENGTH_LONG).show()
+            }
+        })
+    }
+
+    /** Use external media if it is available, our app's file directory otherwise */
+    private fun getOutputDirectory(context: Context): File {
+        val appContext = context.applicationContext
+        val mediaDir = context.externalMediaDirs.firstOrNull()?.let {
+            File(it, appContext.resources.getString(R.string.app_name)).apply { mkdirs() }
+        }
+        return if (mediaDir != null && mediaDir.exists())
+            mediaDir else appContext.filesDir
+    }
+
+    /** Helper function used to create a timestamped file */
+    private fun createFile(baseFolder: File, format: String, extension: String) =
+        File(baseFolder, SimpleDateFormat(format, Locale.US)
+            .format(System.currentTimeMillis()) + extension)
 }
