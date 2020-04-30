@@ -8,6 +8,7 @@ import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Bundle
 import android.util.Log
+import android.util.Size
 import android.view.View
 import android.webkit.MimeTypeMap
 import android.widget.Toast
@@ -23,6 +24,11 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.preference.PreferenceManager
 import com.google.common.util.concurrent.ListenableFuture
 import kotlinx.android.synthetic.main.activity_main.*
+import okhttp3.MediaType
+import okhttp3.RequestBody
+import retrofit2.Call
+import retrofit2.Callback
+import retrofit2.Response
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
@@ -38,8 +44,13 @@ private const val PHOTO_EXTENSION = ".jpg"
 private const val RATIO_4_3_VALUE = 4.0 / 3.0
 private const val RATIO_16_9_VALUE = 16.0 / 9.0
 
-class MainActivity : AppCompatActivity() {
+const val RESULT_KEY = "FACE_DATA"
 
+val apiService by lazy {
+    ApiService.create()
+}
+
+class MainActivity : AppCompatActivity() {
     private lateinit var cameraProviderFuture : ListenableFuture<ProcessCameraProvider>
     private lateinit var imageCapture: ImageCapture
     private lateinit var outputDirectory: File
@@ -105,6 +116,7 @@ class MainActivity : AppCompatActivity() {
         imageCapture = ImageCapture.Builder()
             .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
             .setTargetRotation(preview_view.display.rotation)
+            .setTargetResolution(Size(480, 640))
             .build()
 
         val camera = cameraProvider.bindToLifecycle(this as LifecycleOwner, cameraSelector, preview, imageCapture)
@@ -117,15 +129,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun takePhoto() {
+        capture.visibility = View.GONE
+        tv_1.visibility = View.GONE
+        loading.visibility = View.VISIBLE
         val photoFile = createFile(outputDirectory, FILENAME, PHOTO_EXTENSION)
         val outputFileOptions = ImageCapture.OutputFileOptions.Builder(photoFile).build()
 
         imageCapture.takePicture(outputFileOptions, cameraExecutor, object : ImageCapture.OnImageSavedCallback {
             override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
                 val savedUri = outputFileResults.savedUri ?: Uri.fromFile(photoFile)
-                runOnUiThread {
-                    Toast.makeText(this@MainActivity, "Photo saved: $savedUri", Toast.LENGTH_SHORT).show()
-                }
                 // If the folder selected is an external media directory, this is
                 // unnecessary but otherwise other apps will not be able to access our
                 // images unless we scan them using [MediaScannerConnection]
@@ -138,13 +150,60 @@ class MainActivity : AppCompatActivity() {
                 ) { _, uri ->
                     Log.d(TAG, "Image capture scanned into media store: $uri")
                 }
+                detectPhoto(photoFile)
             }
 
             override fun onError(exception: ImageCaptureException) {
                 exception.printStackTrace()
                 Toast.makeText(this@MainActivity, exception.localizedMessage, Toast.LENGTH_LONG).show()
+                runOnUiThread {
+                    capture.visibility = View.VISIBLE
+                    tv_1.visibility = View.VISIBLE
+                    loading.visibility = View.GONE
+                }
             }
         })
+    }
+
+    private fun detectPhoto(photo: File) {
+        runOnUiThread { tv_2.visibility = View.VISIBLE }
+        apiService.detect(RequestBody.create(MediaType.parse("application/octet-stream"), photo))
+            .enqueue(object : Callback<List<Model.FaceData>> {
+                override fun onFailure(call: Call<List<Model.FaceData>>, t: Throwable) {
+                    t.printStackTrace()
+                    runOnUiThread {
+                        Toast.makeText(this@MainActivity, t.localizedMessage, Toast.LENGTH_SHORT).show()
+                        capture.visibility = View.VISIBLE
+                        tv_1.visibility = View.VISIBLE
+                        loading.visibility = View.GONE
+                        tv_2.visibility = View.GONE
+                    }
+                }
+
+                override fun onResponse(
+                    call: Call<List<Model.FaceData>>,
+                    response: Response<List<Model.FaceData>>
+                ) {
+                    if (response.isSuccessful and !response.body().isNullOrEmpty()) {
+                        val body = response.body()
+                        val result = Intent(this@MainActivity, ResultActivity::class.java)
+                        val bundle = Bundle()
+                        bundle.putSerializable(RESULT_KEY, body?.toTypedArray())
+                        startActivity(result.putExtras(bundle))
+                    }
+                    else {
+                        runOnUiThread {
+                            Toast.makeText(this@MainActivity, "Error: ${response.code()}", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                    runOnUiThread {
+                        capture.visibility = View.VISIBLE
+                        tv_1.visibility = View.VISIBLE
+                        loading.visibility = View.GONE
+                        tv_2.visibility = View.GONE
+                    }
+                }
+            })
     }
 
     /** Use external media if it is available, our app's file directory otherwise */
