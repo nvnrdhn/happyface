@@ -18,10 +18,11 @@ class ResultActivity : AppCompatActivity() {
         setContentView(R.layout.activity_result)
         faceData = intent.extras?.getSerializable(RESULT_KEY) as Model.FaceData?
         if (faceData == null) Toast.makeText(this, "null face data", Toast.LENGTH_LONG).show()
-        else populateRecyclerView()
+        else showResult()
     }
 
-    private fun populateRecyclerView() {
+    private fun showResult() {
+        tv_age.text = "Age: ${faceData!!.faceAttributes.age}"
         var list = mutableListOf<Model.EmotionList>()
         val emotion = faceData!!.faceAttributes.emotion
         emotion::class.memberProperties.forEach {
