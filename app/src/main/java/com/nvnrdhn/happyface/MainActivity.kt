@@ -137,19 +137,19 @@ class MainActivity : AppCompatActivity() {
 
         imageCapture.takePicture(outputFileOptions, cameraExecutor, object : ImageCapture.OnImageSavedCallback {
             override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
-                val savedUri = outputFileResults.savedUri ?: Uri.fromFile(photoFile)
-                // If the folder selected is an external media directory, this is
-                // unnecessary but otherwise other apps will not be able to access our
-                // images unless we scan them using [MediaScannerConnection]
-                val mimeType = MimeTypeMap.getSingleton()
-                    .getMimeTypeFromExtension(savedUri.toFile().extension)
-                MediaScannerConnection.scanFile(
-                    this@MainActivity,
-                    arrayOf(savedUri.toString()),
-                    arrayOf(mimeType)
-                ) { _, uri ->
-                    Log.d(TAG, "Image capture scanned into media store: $uri")
-                }
+//                val savedUri = outputFileResults.savedUri ?: Uri.fromFile(photoFile)
+//                // If the folder selected is an external media directory, this is
+//                // unnecessary but otherwise other apps will not be able to access our
+//                // images unless we scan them using [MediaScannerConnection]
+//                val mimeType = MimeTypeMap.getSingleton()
+//                    .getMimeTypeFromExtension(savedUri.toFile().extension)
+//                MediaScannerConnection.scanFile(
+//                    this@MainActivity,
+//                    arrayOf(savedUri.toString()),
+//                    arrayOf(mimeType)
+//                ) { _, uri ->
+//                    Log.d(TAG, "Image capture scanned into media store: $uri")
+//                }
                 detectPhoto(photoFile)
             }
 
@@ -170,6 +170,7 @@ class MainActivity : AppCompatActivity() {
         apiService.detect(RequestBody.create(MediaType.parse("application/octet-stream"), photo))
             .enqueue(object : Callback<List<Model.FaceData>> {
                 override fun onFailure(call: Call<List<Model.FaceData>>, t: Throwable) {
+                    photo.delete()
                     t.printStackTrace()
                     runOnUiThread {
                         Toast.makeText(this@MainActivity, t.localizedMessage, Toast.LENGTH_SHORT).show()
@@ -184,16 +185,17 @@ class MainActivity : AppCompatActivity() {
                     call: Call<List<Model.FaceData>>,
                     response: Response<List<Model.FaceData>>
                 ) {
+                    photo.delete()
                     if (response.isSuccessful and !response.body().isNullOrEmpty()) {
                         val body = response.body()
                         val result = Intent(this@MainActivity, ResultActivity::class.java)
                         val bundle = Bundle()
-                        bundle.putSerializable(RESULT_KEY, body?.toTypedArray())
+                        bundle.putSerializable(RESULT_KEY, body?.firstOrNull())
                         startActivity(result.putExtras(bundle))
                     }
                     else {
                         runOnUiThread {
-                            Toast.makeText(this@MainActivity, "Error: ${response.code()}", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(this@MainActivity, "Error: No face detected.", Toast.LENGTH_SHORT).show()
                         }
                     }
                     runOnUiThread {

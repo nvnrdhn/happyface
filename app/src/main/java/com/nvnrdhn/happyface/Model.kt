@@ -1,5 +1,6 @@
 package com.nvnrdhn.happyface
 
+import com.google.gson.annotations.SerializedName
 import java.io.Serializable
 
 object Model {
@@ -9,12 +10,22 @@ object Model {
         val age: Int
     ): Serializable
     data class Emotion(
-        val anger: Double,
-        val disgust: Double,
-        val fear: Double,
-        val happiness: Double,
+        @SerializedName("anger")
+        val angry: Double,
+        @SerializedName("disgust")
+        val disgusted: Double,
+        @SerializedName("fear")
+        val scared: Double,
+        @SerializedName("happiness")
+        val happy: Double,
         val neutral: Double,
-        val sadness: Double,
-        val surprise: Double
+        @SerializedName("sadness")
+        val sad: Double,
+        @SerializedName("surprise")
+        val surprised: Double
     ): Serializable
+    data class EmotionList(
+        val name: String,
+        val value: Int
+    )
 }
