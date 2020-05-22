@@ -20,16 +20,22 @@ import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.content.ContextCompat
 import androidx.core.net.toFile
+import androidx.core.net.toUri
 import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.lifecycleScope
 import androidx.preference.PreferenceManager
+import androidx.room.Room
 import com.google.common.util.concurrent.ListenableFuture
 import kotlinx.android.synthetic.main.activity_main.*
+import kotlinx.coroutines.*
+import okhttp3.Dispatcher
 import okhttp3.MediaType
 import okhttp3.RequestBody
 import retrofit2.Call
 import retrofit2.Callback
 import retrofit2.Response
 import java.io.File
+import java.lang.Runnable
 import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.ExecutorService
@@ -49,6 +55,8 @@ const val RESULT_KEY = "FACE_DATA"
 val apiService by lazy {
     ApiService.create()
 }
+
+lateinit var db: HistoryDatabase
 
 class MainActivity : AppCompatActivity() {
     private lateinit var cameraProviderFuture : ListenableFuture<ProcessCameraProvider>
@@ -74,6 +82,13 @@ class MainActivity : AppCompatActivity() {
         }
         else {
             requestPermissions(REQUIRED_PERMISSIONS, REQUEST_CODE_PERMISSIONS)
+        }
+        db = Room.databaseBuilder(
+            applicationContext,
+            HistoryDatabase::class.java, "History"
+        ).build()
+        history.setOnClickListener {
+            startActivity(Intent(this, HistoryActivity::class.java))
         }
     }
 
@@ -137,19 +152,19 @@ class MainActivity : AppCompatActivity() {
 
         imageCapture.takePicture(outputFileOptions, cameraExecutor, object : ImageCapture.OnImageSavedCallback {
             override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
-//                val savedUri = outputFileResults.savedUri ?: Uri.fromFile(photoFile)
-//                // If the folder selected is an external media directory, this is
-//                // unnecessary but otherwise other apps will not be able to access our
-//                // images unless we scan them using [MediaScannerConnection]
-//                val mimeType = MimeTypeMap.getSingleton()
-//                    .getMimeTypeFromExtension(savedUri.toFile().extension)
-//                MediaScannerConnection.scanFile(
-//                    this@MainActivity,
-//                    arrayOf(savedUri.toString()),
-//                    arrayOf(mimeType)
-//                ) { _, uri ->
-//                    Log.d(TAG, "Image capture scanned into media store: $uri")
-//                }
+                val savedUri = outputFileResults.savedUri ?: Uri.fromFile(photoFile)
+                // If the folder selected is an external media directory, this is
+                // unnecessary but otherwise other apps will not be able to access our
+                // images unless we scan them using [MediaScannerConnection]
+                val mimeType = MimeTypeMap.getSingleton()
+                    .getMimeTypeFromExtension(savedUri.toFile().extension)
+                MediaScannerConnection.scanFile(
+                    this@MainActivity,
+                    arrayOf(savedUri.toString()),
+                    arrayOf(mimeType)
+                ) { _, uri ->
+                    Log.d(TAG, "Image capture scanned into media store: $uri")
+                }
                 detectPhoto(photoFile)
             }
 
@@ -170,7 +185,7 @@ class MainActivity : AppCompatActivity() {
         apiService.detect(RequestBody.create(MediaType.parse("application/octet-stream"), photo))
             .enqueue(object : Callback<List<Model.FaceData>> {
                 override fun onFailure(call: Call<List<Model.FaceData>>, t: Throwable) {
-                    photo.delete()
+//                    photo.delete()
                     t.printStackTrace()
                     runOnUiThread {
                         Toast.makeText(this@MainActivity, t.localizedMessage, Toast.LENGTH_SHORT).show()
@@ -185,12 +200,13 @@ class MainActivity : AppCompatActivity() {
                     call: Call<List<Model.FaceData>>,
                     response: Response<List<Model.FaceData>>
                 ) {
-                    photo.delete()
+//                    photo.delete()
                     if (response.isSuccessful and !response.body().isNullOrEmpty()) {
                         val body = response.body()
                         val result = Intent(this@MainActivity, ResultActivity::class.java)
                         val bundle = Bundle()
                         bundle.putSerializable(RESULT_KEY, body?.firstOrNull())
+                        saveToDB(body?.firstOrNull()?.faceAttributes, photo.toUri())
                         startActivity(result.putExtras(bundle))
                     }
                     else {
@@ -222,4 +238,30 @@ class MainActivity : AppCompatActivity() {
     private fun createFile(baseFolder: File, format: String, extension: String) =
         File(baseFolder, SimpleDateFormat(format, Locale.US)
             .format(System.currentTimeMillis()) + extension)
+
+    private fun saveToDB(faceAttributes: Model.FaceAttributes?, fileUri: Uri) {
+        if (faceAttributes != null) {
+            val cTime = Calendar.getInstance().time
+            val history = Model.History(
+                0,
+                faceAttributes.age,
+                faceAttributes.emotion.angry,
+                faceAttributes.emotion.disgusted,
+                faceAttributes.emotion.scared,
+                faceAttributes.emotion.happy,
+                faceAttributes.emotion.neutral,
+                faceAttributes.emotion.sad,
+                faceAttributes.emotion.surprised,
+                cTime.toString(),
+                fileUri.toString()
+            )
+            lifecycleScope.launch { insertHistory(history) }
+        }
+    }
+
+    companion object {
+        suspend fun insertHistory(history: Model.History) = withContext(Dispatchers.IO) {
+            db.historyDao().insertHistory(history)
+        }
+    }
 }
